@@ -1,0 +1,373 @@
+openapi: "3.1.0"
+
+info:
+  title: Wallet Service
+  version: "1.0.0"
+  description: |
+    Single-currency wallet service. Supports creating wallets, depositing and
+    withdrawing funds, checking balances, and paginating transaction history.
+    Balance cannot go negative.
+
+servers:
+  - url: http://localhost:8080
+
+paths:
+  /wallets:
+    post:
+      summary: Create wallet
+      description: Creates a new wallet for the given owner. Each owner may hold at most one wallet.
+      operationId: createWallet
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateWalletRequest"
+            example:
+              owner_id: "user-42"
+      responses:
+        "201":
+          description: Wallet created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Wallet"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          description: A wallet already exists for this owner
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                status: 409
+                code: WALLET_EXISTS
+                message: wallet already exists
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /wallets/{id}:
+    get:
+      summary: Get wallet balance
+      operationId: checkBalance
+      parameters:
+        - $ref: "#/components/parameters/WalletID"
+      responses:
+        "200":
+          description: Current wallet state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Wallet"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/WalletNotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /wallets/{id}/deposit:
+    post:
+      summary: Deposit funds
+      description: |
+        Credits the wallet with the given amount. Use `reference` for
+        idempotency — submitting the same reference twice on the same wallet
+        returns 409 rather than crediting twice.
+      operationId: deposit
+      parameters:
+        - $ref: "#/components/parameters/WalletID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FundsRequest"
+            example:
+              amount: "100.00"
+              reference: "payment-invoice-7821"
+      responses:
+        "201":
+          description: Deposit recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Transaction"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/WalletNotFound"
+        "409":
+          description: A transaction with this reference already exists on this wallet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                status: 409
+                code: TRANSACTION_EXISTS
+                message: transaction with this reference already exists
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /wallets/{id}/withdraw:
+    post:
+      summary: Withdraw funds
+      description: |
+        Debits the wallet by the given amount. Returns 422 if the balance
+        would go negative. Use `reference` for idempotency.
+      operationId: withdraw
+      parameters:
+        - $ref: "#/components/parameters/WalletID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FundsRequest"
+            example:
+              amount: "25.50"
+              reference: "payout-order-9931"
+      responses:
+        "201":
+          description: Withdrawal recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Transaction"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/WalletNotFound"
+        "409":
+          description: A transaction with this reference already exists on this wallet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                status: 409
+                code: TRANSACTION_EXISTS
+                message: transaction with this reference already exists
+        "422":
+          description: Insufficient funds
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                status: 422
+                code: INSUFFICIENT_FUNDS
+                message: insufficient funds
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /wallets/{id}/transactions:
+    get:
+      summary: List transactions
+      description: |
+        Returns transactions for the wallet in reverse-chronological order
+        (newest first). Supports cursor-based pagination via `before`
+        (an RFC3339Nano timestamp from the previous page's `next_cursor`).
+      operationId: listTransactions
+      parameters:
+        - $ref: "#/components/parameters/WalletID"
+        - name: limit
+          in: query
+          description: Maximum number of transactions to return (1–100, default 50)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - name: cursor
+          in: query
+          description: |
+            Opaque pagination cursor. Pass the `next_cursor` value from the
+            previous response to fetch the next page.
+          schema:
+            type: string
+            example: "eyJiZWZvcmUiOiIyMDI0LTAxLTE1VDEwOjMwOjAwWiIsImJlZm9yZV9pZCI6IjdjOWU2Njc5LTc0MjUtNDBkZS05NDRiLWUwN2ZjMWY5MGFlNyJ9"
+      responses:
+        "200":
+          description: Paginated transaction list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TransactionList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/WalletNotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /health:
+    get:
+      summary: Health check
+      operationId: health
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
+components:
+  parameters:
+    WalletID:
+      name: id
+      in: path
+      required: true
+      description: Wallet UUID
+      schema:
+        type: string
+        format: uuid
+        example: "550e8400-e29b-41d4-a716-446655440000"
+
+  schemas:
+    CreateWalletRequest:
+      type: object
+      required: [owner_id]
+      properties:
+        owner_id:
+          type: string
+          description: Unique identifier for the wallet owner
+          example: "user-42"
+
+    FundsRequest:
+      type: object
+      required: [amount]
+      properties:
+        amount:
+          type: string
+          description: Decimal amount (must be positive)
+          example: "100.00"
+        reference:
+          type: string
+          description: |
+            Idempotency key scoped to this wallet. Submitting the same
+            reference twice returns 409 instead of creating a duplicate
+            transaction. Empty string disables idempotency checking.
+          example: "payment-invoice-7821"
+
+    Wallet:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        owner_id:
+          type: string
+          example: "user-42"
+        balance:
+          type: string
+          description: Current balance as a decimal string
+          example: "1234.56"
+        created_at:
+          type: string
+          format: date-time
+          example: "2024-01-15T10:00:00Z"
+        updated_at:
+          type: string
+          format: date-time
+          example: "2024-01-15T10:30:00Z"
+
+    Transaction:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+        wallet_id:
+          type: string
+          format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        type:
+          type: string
+          enum: [deposit, withdraw]
+          example: "deposit"
+        amount:
+          type: string
+          description: Transaction amount as a decimal string
+          example: "100.00"
+        balance_after:
+          type: string
+          description: Wallet balance immediately after this transaction
+          example: "1234.56"
+        reference:
+          type: string
+          example: "payment-invoice-7821"
+        created_at:
+          type: string
+          format: date-time
+          example: "2024-01-15T10:30:00Z"
+
+    TransactionList:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Transaction"
+        next_cursor:
+          type: string
+          nullable: true
+          description: |
+            Opaque pagination token. Pass as `cursor` in the next request to
+            fetch the next page. Absent when there are no more pages.
+          example: "eyJiZWZvcmUiOiIyMDI0LTAxLTE1VDEwOjMwOjAwWiIsImJlZm9yZV9pZCI6IjdjOWU2Njc5LTc0MjUtNDBkZS05NDRiLWUwN2ZjMWY5MGFlNyJ9"
+
+    Error:
+      type: object
+      properties:
+        status:
+          type: integer
+          example: 400
+        code:
+          type: string
+          example: INVALID_AMOUNT
+        message:
+          type: string
+          example: amount must be positive
+
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            status: 400
+            code: INVALID_AMOUNT
+            message: amount must be positive
+
+    WalletNotFound:
+      description: Wallet not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            status: 404
+            code: WALLET_NOT_FOUND
+            message: wallet not found
+
+    InternalError:
+      description: Unexpected server error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            status: 500
+            code: INTERNAL_ERROR
+            message: internal error
