@@ -65,7 +65,7 @@ func NewHandler(
 }
 
 func (h *Handler) CreateWallet(w http.ResponseWriter, r *http.Request) {
-	defer r.Body.Close()
+	defer r.Body.Close() //nolint:errcheck
 
 	req, ok := decodeJSON[createWalletRequest](w, r)
 	if !ok {
@@ -86,7 +86,7 @@ func (h *Handler) CreateWallet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Deposit(w http.ResponseWriter, r *http.Request) {
-	defer r.Body.Close()
+	defer r.Body.Close() //nolint:errcheck
 
 	walletID, ok := parseWalletID(w, r)
 	if !ok {
@@ -137,7 +137,7 @@ func (h *Handler) CheckBalance(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Withdraw(w http.ResponseWriter, r *http.Request) {
-	defer r.Body.Close()
+	defer r.Body.Close() //nolint:errcheck
 
 	walletID, ok := parseWalletID(w, r)
 	if !ok {

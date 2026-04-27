@@ -6,8 +6,9 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/arangue/challenge-wallet/internal/domain"
 	"github.com/google/uuid"
+
+	"github.com/arangue/challenge-wallet/internal/domain"
 )
 
 func TestNewWithdrawer(t *testing.T) {

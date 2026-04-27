@@ -3,8 +3,9 @@ package application
 import (
 	"context"
 
-	"github.com/arangue/challenge-wallet/internal/domain"
 	"github.com/google/uuid"
+
+	"github.com/arangue/challenge-wallet/internal/domain"
 )
 
 type Lister interface {

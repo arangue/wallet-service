@@ -7,8 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/arangue/challenge-wallet/internal/domain"
 	"github.com/google/uuid"
+
+	"github.com/arangue/challenge-wallet/internal/domain"
 )
 
 func TestNewLister(t *testing.T) {

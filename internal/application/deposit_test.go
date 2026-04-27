@@ -5,8 +5,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/arangue/challenge-wallet/internal/domain"
 	"github.com/google/uuid"
+
+	"github.com/arangue/challenge-wallet/internal/domain"
 )
 
 func Test_depositor_Execute(t *testing.T) {

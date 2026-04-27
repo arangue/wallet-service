@@ -5,8 +5,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/arangue/challenge-wallet/internal/domain"
 	"github.com/google/uuid"
+
+	"github.com/arangue/challenge-wallet/internal/domain"
 )
 
 // mockWalletRepo aliases mockRepo so auto-generated tests referencing it compile.

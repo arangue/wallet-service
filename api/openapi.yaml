@@ -107,6 +107,16 @@ paths:
                 status: 409
                 code: TRANSACTION_EXISTS
                 message: transaction with this reference already exists
+        "422":
+          description: Deposit would exceed maximum wallet balance
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                status: 422
+                code: BALANCE_OVERFLOW
+                message: transaction would exceed maximum wallet balance
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -167,8 +177,9 @@ paths:
       summary: List transactions
       description: |
         Returns transactions for the wallet in reverse-chronological order
-        (newest first). Supports cursor-based pagination via `before`
-        (an RFC3339Nano timestamp from the previous page's `next_cursor`).
+        (newest first). Supports cursor-based pagination — pass the opaque
+        `next_cursor` token from the previous response as the `cursor` query
+        parameter to fetch the next page.
       operationId: listTransactions
       parameters:
         - $ref: "#/components/parameters/WalletID"

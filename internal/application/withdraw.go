@@ -2,10 +2,12 @@ package application
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 
-	"github.com/arangue/challenge-wallet/internal/domain"
 	"github.com/google/uuid"
+
+	"github.com/arangue/challenge-wallet/internal/domain"
 )
 
 type Withdrawer interface {
@@ -26,11 +28,6 @@ func NewWithdrawer(repo domain.WalletRepository, transactor domain.Transactor) W
 func (w withdrawer) Execute(ctx context.Context, walletID uuid.UUID, amount domain.Money, reference string) (domain.Transaction, error) {
 	l := slog.With("wallet_id", walletID, "amount", amount.String(), "reference", reference)
 	l.Debug("processing withdrawal")
-
-	if !amount.IsPositive() {
-		l.Warn("withdrawal failed: non-positive amount")
-		return domain.Transaction{}, domain.ErrNonPositiveAmount
-	}
 
 	var tx domain.Transaction
 
@@ -55,7 +52,13 @@ func (w withdrawer) Execute(ctx context.Context, walletID uuid.UUID, amount doma
 	})
 
 	if err != nil {
-		l.Error("withdrawal failed", "error", err)
+		if errors.Is(err, domain.ErrWalletNotFound) ||
+			errors.Is(err, domain.ErrInsufficientFunds) ||
+			errors.Is(err, domain.ErrTransactionExists) {
+			l.Warn("withdrawal failed", "error", err)
+		} else {
+			l.Error("withdrawal failed", "error", err)
+		}
 		return domain.Transaction{}, err
 	}
 

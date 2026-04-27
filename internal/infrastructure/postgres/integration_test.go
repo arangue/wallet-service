@@ -435,3 +435,89 @@ func TestConcurrency_DoubleSpend(t *testing.T) {
 		t.Errorf("expected %d failed withdrawals, got %d", goroutines-1, failures)
 	}
 }
+
+func TestConcurrency_ConcurrentDeposits(t *testing.T) {
+	pool := newTestPool(t)
+	truncate(t, pool)
+
+	ctx := context.Background()
+	repo := postgres.NewWalletRepository(pool)
+	transactor := postgres.NewTransactor(pool)
+
+	wallet := seedWallet(t, ctx, repo, transactor, "owner-concurrent-deposits", "")
+	depositor := application.NewDepositor(repo, transactor)
+
+	const goroutines = 10
+	amount := mustMoney(t, "10.00")
+
+	var wg sync.WaitGroup
+	for i := range goroutines {
+		wg.Go(func() {
+			if _, err := depositor.Execute(ctx, wallet.ID, amount, fmt.Sprintf("dep-%d", i)); err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+	wg.Wait()
+
+	got, err := repo.FindByID(ctx, wallet.ID)
+	if err != nil {
+		t.Fatalf("find wallet: %v", err)
+	}
+	want := mustMoney(t, "100.00")
+	if !got.Balance.Equal(want) {
+		t.Errorf("expected balance %s after %d concurrent deposits, got %s", want, goroutines, got.Balance)
+	}
+}
+
+func TestConcurrency_IdempotentDeposit(t *testing.T) {
+	pool := newTestPool(t)
+	truncate(t, pool)
+
+	ctx := context.Background()
+	repo := postgres.NewWalletRepository(pool)
+	transactor := postgres.NewTransactor(pool)
+
+	wallet := seedWallet(t, ctx, repo, transactor, "owner-idempotent", "")
+	depositor := application.NewDepositor(repo, transactor)
+	amount := mustMoney(t, "50.00")
+
+	const goroutines = 10
+	var (
+		wg         sync.WaitGroup
+		mu         sync.Mutex
+		successes  int
+		duplicates int
+	)
+
+	for range goroutines {
+		wg.Go(func() {
+			_, err := depositor.Execute(ctx, wallet.ID, amount, "idempotent-ref")
+			mu.Lock()
+			defer mu.Unlock()
+			if err == nil {
+				successes++
+			} else if errors.Is(err, domain.ErrTransactionExists) {
+				duplicates++
+			} else {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+	wg.Wait()
+
+	if successes != 1 {
+		t.Errorf("expected exactly 1 successful deposit, got %d", successes)
+	}
+	if duplicates != goroutines-1 {
+		t.Errorf("expected %d duplicate rejections, got %d", goroutines-1, duplicates)
+	}
+
+	got, err := repo.FindByID(ctx, wallet.ID)
+	if err != nil {
+		t.Fatalf("find wallet: %v", err)
+	}
+	if !got.Balance.Equal(amount) {
+		t.Errorf("expected balance %s (credited once), got %s", amount, got.Balance)
+	}
+}

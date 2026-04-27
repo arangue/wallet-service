@@ -58,22 +58,19 @@ func CorrelationIDMiddleware(next http.Handler) http.Handler {
 
 func LoggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet {
-			next.ServeHTTP(w, r)
-			return
-		}
-
 		start := time.Now()
 		rec := &responseRecorder{ResponseWriter: w, status: http.StatusOK}
 
 		next.ServeHTTP(rec, r)
 
-		slog.Info("request",
-			"method", r.Method,
-			"path", r.URL.Path,
-			"status", rec.status,
-			"duration_ms", time.Since(start).Milliseconds(),
-			"request_id", RequestIDFromContext(r.Context()),
-		)
+		if r.Method != http.MethodGet || rec.status >= http.StatusBadRequest {
+			slog.Info("request",
+				"method", r.Method,
+				"path", r.URL.Path,
+				"status", rec.status,
+				"duration_ms", time.Since(start).Milliseconds(),
+				"request_id", RequestIDFromContext(r.Context()),
+			)
+		}
 	})
 }

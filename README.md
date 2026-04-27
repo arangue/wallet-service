@@ -61,9 +61,50 @@ Client
 | Concurrency | `SELECT FOR UPDATE` inside a DB transaction on every mutation |
 | Double-spend | Row-level lock prevents concurrent withdrawals on the same wallet |
 | Idempotency | Optional `reference` field — unique per wallet when non-empty |
-| Pagination | Cursor-based (`before` timestamp) — safe under concurrent inserts |
-| Logging | Structured JSON via `slog` — mutations only, not reads |
+| Pagination | Cursor-based (`created_at`, `id`) — stable tiebreaker prevents skipped rows under concurrent inserts |
+| Logging | Structured JSON via `slog` — request ID, wallet ID, amount, and outcome on every mutation |
 | Shutdown | Graceful — drains in-flight requests before closing (10s timeout) |
+| Authentication | Out of scope — expected to be handled upstream (e.g. API gateway or auth middleware) before requests reach this service |
+| Rate limiting | Out of scope — expected to be enforced at the API gateway layer |
+
+---
+
+## Idempotency & safe retries
+
+Deposit and withdraw requests accept an optional `reference` field. When a non-empty reference is provided, the service enforces uniqueness per wallet: a second request with the same reference on the same wallet returns `409 TRANSACTION_EXISTS` rather than applying the operation again.
+
+This makes it safe to retry failed or timed-out requests:
+
+```
+Client                          Service
+  │                                │
+  ├─── POST /deposit ref=txn-1 ───▶│
+  │         (timeout / crash)      │ ← DB commit succeeded
+  │                                │
+  ├─── POST /deposit ref=txn-1 ───▶│ ← duplicate detected
+  │◀── 409 TRANSACTION_EXISTS ─────│
+  │                                │
+```
+
+The `409` response signals "already done" — the money moved exactly once. The client can treat this as a success and re-fetch the wallet balance or transaction list if it needs the original response body.
+
+> Note: the same `reference` can be reused across different wallets — uniqueness is scoped to `(wallet_id, reference)`.
+
+---
+
+## Authentication
+
+Authentication is intentionally out of scope for this service. In a production deployment it would be handled upstream — by an API gateway, a reverse proxy, or a shared auth middleware — before requests arrive here. The `owner_id` field on each wallet is designed to carry the verified caller identity once auth is wired in.
+
+---
+
+## Observability
+
+- **Structured logging** — all output is JSON via `slog`. Every mutating request logs `wallet_id`, `amount`, `reference`, `transaction_id`, and outcome at `INFO` level. Errors log at `ERROR` with full context.
+- **Request IDs** — the `X-Request-ID` header is propagated through the request lifecycle and included in all log lines. If the client does not send one, the service generates a UUID automatically.
+- **Health check** — `GET /health` pings the database and returns `200 {"status":"ok"}` or `503 {"status":"unavailable"}`. Suitable for Kubernetes liveness and readiness probes.
+
+---
 
 ## Getting started
 
@@ -91,13 +132,32 @@ make dev
 | `DATABASE_URL` | Postgres connection string | required |
 | `PORT` | HTTP port | `8080` |
 
+Connection pool settings (`MaxConns=25`, `MinConns=5`, `MaxConnLifetime=30m`, `MaxConnIdleTime=5m`) are hardcoded in `cmd/server/main.go`.
+
 Copy `.env.example` to `.env` and adjust as needed.
+
+---
 
 ## API
 
 Base URL: `http://localhost:8080`
 
 All request and response bodies are JSON. Money values are strings to preserve decimal precision.
+
+---
+
+### Health check
+
+```
+GET /health
+```
+
+**Response** `200 OK`
+```json
+{ "status": "ok" }
+```
+
+Returns `503 Service Unavailable` with `{"status":"unavailable"}` if the database is unreachable.
 
 ---
 
@@ -146,7 +206,7 @@ POST /wallets/{id}/deposit
 }
 ```
 
-> `reference` is optional. If provided and non-empty, repeated requests with the same reference on the same wallet return `409 TRANSACTION_EXISTS` — use this for safe retries.
+`reference` is optional but strongly recommended — see [Idempotency & safe retries](#idempotency--safe-retries).
 
 **Response** `201 Created`
 ```json
@@ -185,6 +245,8 @@ POST /wallets/{id}/withdraw
   "reference": "txn-xyz-456"
 }
 ```
+
+`reference` is optional but strongly recommended — see [Idempotency & safe retries](#idempotency--safe-retries).
 
 **Response** `201 Created`
 ```json
@@ -240,15 +302,17 @@ GET /wallets/{id}
 ### List transactions
 
 ```
-GET /wallets/{id}/transactions?limit=50&before=<cursor>
+GET /wallets/{id}/transactions?limit=50&cursor=<cursor>
 ```
+
+Results are ordered newest first. Pass the `next_cursor` from each response as the `cursor` parameter on the next request to page through the full history.
 
 **Query parameters**
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
 | `limit` | integer | `50` | Number of results (1–100) |
-| `before` | RFC3339 timestamp | — | Cursor from previous page's `next_cursor` |
+| `cursor` | opaque string | — | Cursor token from previous page's `next_cursor` |
 
 **Response** `200 OK`
 ```json
@@ -264,11 +328,11 @@ GET /wallets/{id}/transactions?limit=50&before=<cursor>
       "created_at": "2024-01-15T10:02:00Z"
     }
   ],
-  "next_cursor": "2024-01-15T10:01:00Z"
+  "next_cursor": "eyJiZWZvcmUiOiIyMDI0LTAxLTE1VDEwOjAxOjAwWiIsImJlZm9yZV9pZCI6Ii4uLiJ9"
 }
 ```
 
-> `next_cursor` is omitted when there are no more pages. Pass it as `before` to fetch the next page.
+`next_cursor` is omitted when there are no more pages.
 
 **Errors**
 
@@ -276,7 +340,7 @@ GET /wallets/{id}/transactions?limit=50&before=<cursor>
 |---|---|---|
 | 400 | `INVALID_WALLET_ID` | Malformed UUID |
 | 400 | `INVALID_LIMIT` | Limit out of range |
-| 400 | `INVALID_CURSOR` | Unparseable `before` timestamp |
+| 400 | `INVALID_CURSOR` | Unparseable cursor token |
 | 404 | `WALLET_NOT_FOUND` | Wallet does not exist |
 
 ---
@@ -292,6 +356,8 @@ All errors follow this structure:
   "message": "insufficient funds"
 }
 ```
+
+---
 
 ## Development
 

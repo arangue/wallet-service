@@ -2,10 +2,12 @@ package application
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 
-	"github.com/arangue/challenge-wallet/internal/domain"
 	"github.com/google/uuid"
+
+	"github.com/arangue/challenge-wallet/internal/domain"
 )
 
 type Depositor interface {
@@ -24,11 +26,6 @@ func NewDepositor(repo domain.WalletRepository, transactor domain.Transactor) De
 func (d depositor) Execute(ctx context.Context, walletID uuid.UUID, amount domain.Money, reference string) (domain.Transaction, error) {
 	l := slog.With("wallet_id", walletID, "amount", amount.String(), "reference", reference)
 	l.Debug("processing deposit")
-
-	if !amount.IsPositive() {
-		l.Warn("deposit failed: non-positive amount")
-		return domain.Transaction{}, domain.ErrNonPositiveAmount
-	}
 
 	var tx domain.Transaction
 
@@ -53,7 +50,13 @@ func (d depositor) Execute(ctx context.Context, walletID uuid.UUID, amount domai
 	})
 
 	if err != nil {
-		l.Error("deposit failed", "error", err)
+		if errors.Is(err, domain.ErrWalletNotFound) ||
+			errors.Is(err, domain.ErrBalanceOverflow) ||
+			errors.Is(err, domain.ErrTransactionExists) {
+			l.Warn("deposit failed", "error", err)
+		} else {
+			l.Error("deposit failed", "error", err)
+		}
 		return domain.Transaction{}, err
 	}
 
