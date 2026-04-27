@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS transactions (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_transactions_wallet_reference
-    ON transactions(wallet_id, reference)
+    ON transactions(wallet_id, type, reference)
     WHERE reference <> '';
 `
 
@@ -371,6 +371,21 @@ func TestReferenceUniqueness(t *testing.T) {
 				}
 				if _, err := depositor.Execute(ctx, walletB.ID, amount, "shared-ref"); err != nil {
 					t.Fatalf("deposit wallet B with same reference: %v", err)
+				}
+			},
+		},
+		{
+			name: "same reference on deposit and withdrawal succeeds",
+			run: func(t *testing.T, ctx context.Context, repo *postgres.WalletRepository, transactor domain.Transactor) {
+				wallet := seedWallet(t, ctx, repo, transactor, "owner-cross-type-ref", "100.00")
+				depositor := application.NewDepositor(repo, transactor)
+				withdrawer := application.NewWithdrawer(repo, transactor)
+				amount := mustMoney(t, "10.00")
+				if _, err := depositor.Execute(ctx, wallet.ID, amount, "ref-cross"); err != nil {
+					t.Fatalf("deposit with ref-cross: %v", err)
+				}
+				if _, err := withdrawer.Execute(ctx, wallet.ID, amount, "ref-cross"); err != nil {
+					t.Fatalf("withdraw with same ref-cross should succeed: %v", err)
 				}
 			},
 		},

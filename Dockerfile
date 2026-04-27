@@ -32,9 +32,6 @@ WORKDIR /app
 # Copy the binary from the builder stage
 COPY --from=builder /bin/server .
 
-# Copy migrations (required for the app to run them on startup)
-COPY --from=builder /src/internal/infrastructure/postgres/migrations ./internal/infrastructure/postgres/migrations
-
 # Use the non-root user
 USER appuser
 
