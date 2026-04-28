@@ -88,7 +88,7 @@ Client                          Service
 
 The `409` response signals "already done" — the money moved exactly once. The client can treat this as a success and re-fetch the wallet balance or transaction list if it needs the original response body.
 
-> Note: the same `reference` can be reused across different wallets — uniqueness is scoped to `(wallet_id, reference)`.
+> Note: the same `reference` can be reused across different wallets, and across different operation types on the same wallet (e.g. a deposit and a withdrawal can share the same reference). Uniqueness is scoped to `(wallet_id, type, reference)`.
 
 ---
 
@@ -100,7 +100,7 @@ Authentication is intentionally out of scope for this service. In a production d
 
 ## Observability
 
-- **Structured logging** — all output is JSON via `slog`. Every mutating request logs `wallet_id`, `amount`, `reference`, `transaction_id`, and outcome at `INFO` level. Errors log at `ERROR` with full context.
+- **Structured logging** — all output is JSON via `slog`. Every mutating request logs `wallet_id`, `amount`, `reference`, `transaction_id`, and outcome at `INFO` level. Business errors (insufficient funds, duplicate reference, wallet not found) log at `WARN`; infrastructure failures log at `ERROR`.
 - **Request IDs** — the `X-Request-ID` header is propagated through the request lifecycle and included in all log lines. If the client does not send one, the service generates a UUID automatically.
 - **Health check** — `GET /health` pings the database and returns `200 {"status":"ok"}` or `503 {"status":"unavailable"}`. Suitable for Kubernetes liveness and readiness probes.
 
